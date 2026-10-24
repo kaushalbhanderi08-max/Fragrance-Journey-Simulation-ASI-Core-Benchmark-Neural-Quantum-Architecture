@@ -1,0 +1,666 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Fragrance Journey Simulation</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: dark film-like stage (body monitor on the left, changing world scene on the right), then transport controls, caption and scene chips. Single dark look by choice. */
+:root{color-scheme:dark;--bg:#0a1019;--panel:#101a29;--line:#22344a;--fg:#e7eef7;--mute:#8fa2b8;--accent:#b79cff;--ui:'Sora',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 var(--ui);margin:0;padding-block:20px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:clamp(20px,3.4vw,28px);line-height:1.2;margin:0;font-weight:700;letter-spacing:-.01em;text-wrap:balance}
+.sub{color:var(--mute);margin:0;max-width:70ch}
+.stage{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0b1320}
+canvas{display:block;width:100%;max-width:100%;aspect-ratio:16/9}
+.ctl{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.ctl input[type=range]{flex:1 1 220px;min-width:0;accent-color:var(--accent)}
+button,select{font:inherit;font-size:14px;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 14px;cursor:pointer}
+button:hover,select:hover{border-color:#3a5578}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.time{font:500 13px var(--mono);color:var(--mute);min-width:6.5em;font-variant-numeric:tabular-nums}
+label.lp{display:flex;gap:6px;align-items:center;font-size:14px;color:var(--mute)}
+.cap{min-height:5.6em;border-left:3px solid var(--accent);padding:2px 0 2px 12px;max-width:80ch}
+.cap b{display:block;font-weight:600;margin-bottom:2px}
+.cap span{color:var(--mute)}
+.steps{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.steps button{text-align:left;padding:8px 12px;font-size:13px;line-height:1.35;min-width:0}
+.steps small{display:block;color:var(--mute);font:400 12px var(--mono);font-variant-numeric:tabular-nums}
+.steps button[aria-current="true"]{border-color:var(--accent);background:#1a2238}
+.note{color:var(--mute);font-size:13px;max-width:80ch;margin:0}
+</style>
+
+<div class="wrap">
+  <h1>Fragrance Journey Simulation</h1>
+  <p class="sub">A 100-second animation that follows one fragrance from a smell, to an empty bottle, an online order, factory, warehouse and drone delivery, to the final spray. The brain, cells, wearable sensor and the neural networks of every computer and agent react at each step.</p>
+  <div class="stage"><canvas id="stage" role="img" aria-label="Animation: a person smells a fragrance, finds the perfume bottle empty, watches a lavender reel, sees an Order now pop-up in it and orders a lavender perfume. A manufacturer AI agent 3D prints a bottle, fills and packs it, a dog robot carries it to a warehouse, a drone delivers it, and the person sprays it while the brain and cells react."></canvas></div>
+  <div class="ctl">
+    <button id="play" type="button">Pause</button>
+    <input id="seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Timeline">
+    <span class="time" id="time">0.0 / 100 s</span>
+    <select id="speed" aria-label="Speed"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option><option value="3">3x</option></select>
+    <label class="lp"><input id="loop" type="checkbox" checked> Loop</label>
+  </div>
+  <div class="cap" id="cap"></div>
+  <div class="steps" id="steps"></div>
+  <p class="note">This is a conceptual, educational model. Real neurons do not connect directly to computers, and the effect of a smell differs from person to person. The cell count (~37 trillion) is an estimate and only a few hundred are drawn. The pop-up and all companies are generic demos with no real brands. The wearable-to-computer link is conceptual, and in practice sharing body data with a feed would need the person's consent. The order is only placed when the human taps Order now (MEDIUM control).</p>
+</div>
+
+<script>
+(()=>{
+const W=1280,H=720,D=100;
+const cv=document.getElementById('stage'),ctx=cv.getContext('2d');
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const seg=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+const lerp=(a,b,u)=>a+(b-a)*u;
+const rand=(a,b)=>a+Math.random()*(b-a);
+const rnd=i=>{const x=Math.sin(i*127.1+311.7)*43758.5453;return x-Math.floor(x)};
+const C={mute:'#8fa2b8',line:'#2a3f5a',body:'#13233a',green:[54,211,153],lav:[183,156,255],slate:[122,138,168],edge:[79,122,168],lavH:'#b79cff',lavL:'#d9c9ff',slateH:'#8aa4d6',gold:'#ffd84d',teal:'#2dd4bf',ok:'#4ade80',red:'#f43f5e'};
+C.pink='#ff9ed2';
+const MONO='"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace',UI='Sora,system-ui,sans-serif';
+
+const SCENES=[
+ {t:0,n:'Smell, then an idea',x:'In the hall he notices a fragrance. Nose signals reach the brain, neurons fire and his cells turn a calm lavender. The wearable sensor picks this up and the neural network computer shows it. Then the idea comes: "Is my perfume finished? Let me check."'},
+ {t:8,n:'Wardrobe: bottle is empty',x:'At the wardrobe he finds the bottle empty. His neurons fire disappointment and his cells turn a dull slate. The wearable relays it and the network concludes: perfume needed.'},
+ {t:18,n:'Reels shaped by context',x:'With his consent, the network passes the context (the smell and the empty bottle) to his reels app, so lavender content starts to appear. When he watches the lavender reel his neurons and cells react again, the wearable relays it, and the network updates: wants lavender perfume.'},
+ {t:28,n:'Order now pop-up',x:'Right inside the reel, an Order now pop-up appears for a lavender perfume from a maker (a generic demo). The network only records his intent. He taps Order now himself, so the order goes out only through the human\'s own action (human control: MEDIUM).'},
+ {t:38,n:'AI agent gets the order',x:'The manufacturer\'s AI agent receives the order. Its neural network lights up, builds a plan (design, fill, pack, hand off) and logs each step.'},
+ {t:42,n:'3D printer: special bottle',x:'The agent\'s network tells the 3D printer to start and reads the print progress. The printer builds a special lavender bottle layer by layer.'},
+ {t:48,n:'Filling machine',x:'The network sees the bottle is ready and starts filling. The bottle rides the belt to the filling machine and the nozzle fills it with perfume.'},
+ {t:54,n:'Packaging machine',x:'The network sees the bottle is full and starts packing. The bottle moves to the packaging machine, where it is boxed and sealed.'},
+ {t:58.5,n:'Dog robot to warehouse',x:'A dog robot takes the box on its back and walks it from the factory to the warehouse, steered by its own navigation neural network.'},
+ {t:70,n:'Warehouse scan',x:'The warehouse agent\'s network reads the scan, sees the destination and picks the fastest delivery mode.'},
+ {t:74,n:'Transport booking',x:'The warehouse network decides on a drone and books it. The transport company\'s network checks its fleet and weather, assigns a drone and confirms.'},
+ {t:80,n:'Drone delivery',x:'The drone\'s onboard neural network reads GPS, wind and obstacles, steers to the warehouse, lifts the parcel, flies it to the home, lands and releases it.'},
+ {t:90,n:'Parcel in hand: curious and happy',x:'The parcel reaches his hands. He feels happy and curious: his neurons fire excitement, his cells flush pink and his pulse rises. The wearable relays it and the network logs "happy anticipation" as he starts to open the box.'},
+ {t:93,n:'Spray: calm delight',x:'He takes out the bottle and sprays it on his body. The smell brings a different feeling: calm pleasure. His neurons fire lavender, the cells settle into a calm lavender glow, and the network logs "delight, need satisfied". Then the loop restarts.'}
+];
+
+/* ---------- monitor body ---------- */
+const parts=[
+ {p:[[230,100],[230,100.5]],w:112},{p:[[230,150],[230,185]],w:34},{p:[[230,205],[230,375]],w:122},
+ {p:[[178,205],[128,320],[120,420]],w:34},{p:[[282,205],[335,310],[345,405]],w:34},
+ {p:[[205,400],[198,640]],w:52},{p:[[255,400],[262,640]],w:52}
+];
+function dseg(x,y,a,b){const dx=b[0]-a[0],dy=b[1]-a[1];let u=((x-a[0])*dx+(y-a[1])*dy)/(dx*dx+dy*dy||1);u=clamp(u,0,1);return Math.hypot(x-a[0]-u*dx,y-a[1]-u*dy)}
+function inBody(x,y){for(const p of parts){const r=p.w/2-6;for(let i=0;i<p.p.length-1;i++)if(dseg(x,y,p.p[i],p.p[i+1])<r)return true}return false}
+const cells=[];
+for(let n=0;n<300;n++){let x,y,k=0;do{x=rand(100,370);y=rand(165,670);k++}while(!inBody(x,y)&&k<300);cells.push({x,y,a:rand(0,6.28),s:rand(8,24),r:rand(2.6,5)})}
+function stepCells(dt){for(const c of cells){c.a+=(Math.random()-.5)*2.4*dt;const nx=c.x+Math.cos(c.a)*c.s*dt,ny=c.y+Math.sin(c.a)*c.s*dt;if(ny>165&&inBody(nx,ny)){c.x=nx;c.y=ny}else c.a+=Math.PI*rand(.6,1.4)}}
+function mood(t){
+ if(t<1)return .55;if(t<3.5)return lerp(.55,.85,seg(t,1,3.5));if(t<8)return lerp(.85,.65,seg(t,3.5,8));
+ if(t<14)return lerp(.65,.32,seg(t,8,14));if(t<18)return .32;
+ if(t<26)return lerp(.32,.62,seg(t,18,26));if(t<38)return lerp(.62,.72,seg(t,26,38));
+ if(t<90)return .72;if(t<92.8)return lerp(.72,.9,seg(t,90,92.8));if(t<93.5)return .9;if(t<97)return lerp(.9,.98,seg(t,93.5,97));return .98;
+}
+const mx=(a,b,u)=>`${Math.round(lerp(a[0],b[0],u))},${Math.round(lerp(a[1],b[1],u))},${Math.round(lerp(a[2],b[2],u))}`;
+const moodCol=M=>M>=.5?mx(C.green,C.lav,clamp((M-.5)*2.8,0,1)):mx(C.green,C.slate,clamp((.5-M)*4.5,0,1));
+
+/* ---------- paths ---------- */
+function info(pts){const cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]));return{pts,cum,L:cum[cum.length-1]}}
+function at(P,l){l=clamp(l,0,P.L);let i=1;while(i<P.cum.length-1&&P.cum[i]<l)i++;const a=P.pts[i-1],b=P.pts[i],u=(l-P.cum[i-1])/((P.cum[i]-P.cum[i-1])||1);return[lerp(a[0],b[0],u),lerp(a[1],b[1],u)]}
+const Pnb=info([[230,128],[238,112],[226,98],[230,88]]);
+const branches=[
+ [[230,110],[230,160],[230,210],[230,290]],
+ [[230,210],[190,228],[150,270],[130,330],[122,410]],
+ [[230,210],[270,228],[310,270],[335,320],[344,390]],
+ [[230,290],[222,360],[207,480],[198,620]],
+ [[230,290],[240,360],[255,480],[262,620]],
+ [[230,260],[180,300],[170,350]],
+ [[230,260],[280,300],[290,350]]
+].map(info);
+
+/* ---------- helpers ---------- */
+function txt(s,x,y,size,col,align,weight,font){ctx.font=`${weight||400} ${size}px ${font||MONO}`;ctx.fillStyle=col;ctx.textAlign=align||'left';ctx.textBaseline='alphabetic';ctx.fillText(s,x,y)}
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function poly(pts,w,col){ctx.beginPath();pts.forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]));ctx.lineWidth=w;ctx.strokeStyle=col;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
+function bolt(P,a,b,t,col){
+ const s=seg(t,a,b);if(s<=0)return;
+ const fade=t>b?1-seg(t,b,b+1.3):1;if(fade<=0)return;
+ const head=s*P.L,tail=t>b?0:Math.max(0,head-240),fr=Math.floor(t*18);
+ const line=(from,to,alpha,w,color,blur)=>{
+  if(to-from<1)return;
+  ctx.save();ctx.globalAlpha=alpha*fade;ctx.strokeStyle=color;ctx.lineWidth=w;ctx.lineJoin='round';ctx.lineCap='round';ctx.shadowColor=col;ctx.shadowBlur=blur;
+  ctx.beginPath();
+  for(let l=from;;l+=11){
+   const ll=Math.min(l,to),p=at(P,ll),q=at(P,ll+1);
+   let nx=-(q[1]-p[1]),ny=q[0]-p[0];const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;
+   const edge=Math.min(ll,P.L-ll,20)/20,j=(rnd(Math.round(ll/11)*7+fr*131)-.5)*12*edge;
+   const x=p[0]+nx*j,y=p[1]+ny*j;
+   if(ll===from)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+   if(ll>=to)break;
+  }
+  ctx.stroke();ctx.restore();
+ };
+ line(0,head,.28,3,col,0);line(tail,head,.9,6,col,16);line(tail,head,1,2,'#fff',0);
+ if(t<=b){const p=at(P,head);ctx.save();ctx.fillStyle='#fff';ctx.shadowColor=col;ctx.shadowBlur=22;ctx.beginPath();ctx.arc(p[0],p[1],5,0,7);ctx.fill();ctx.restore()}
+}
+function sense(t,a,b,col,head){
+ if(!head)return;
+ const P=info([[head[0]+14,head[1]],[(head[0]+270)/2,150],[268,118]]);
+ const m=a+(b-a)*.55;bolt(P,a,m,t,col);bolt(Pnb,m,b,t,col);
+}
+function effect(t,a,b,col){branches.forEach((br,i)=>bolt(br,a+i*.1,b+i*.1,t,col))}
+function bubbleAt(x,y,s,col){
+ ctx.font=`600 17px ${UI}`;const w=ctx.measureText(s).width+28;
+ ctx.fillStyle='#1b2740';ctx.strokeStyle='#3a5878';ctx.lineWidth=1.5;
+ ctx.beginPath();ctx.arc(x-12,y+34,4,0,7);ctx.arc(x,y+22,6,0,7);ctx.fill();ctx.stroke();
+ rr(x+8,y-18,w,38,12);ctx.fill();ctx.stroke();txt(s,x+8+w/2,y+7,17,col,'center',600,UI);
+}
+
+/* ---------- monitor drawing ---------- */
+const bn=[];for(let i=0;i<11;i++){const a=rnd(i+1)*6.283,r=Math.sqrt(rnd(i+40))*.9;bn.push([230+Math.cos(a)*r*34,86+Math.sin(a)*r*21])}
+const be=[];bn.forEach((p,i)=>{bn.map((q,j)=>[Math.hypot(p[0]-q[0],p[1]-q[1]),j]).filter(v=>v[1]!==i).sort((a,b)=>a[0]-b[0]).slice(0,2).forEach(v=>be.push([i,v[1]]))});
+const FIRE=[[1.6,5.4,C.lavH],[5.6,8,C.gold],[9.8,14.5,C.slateH],[21.8,26.5,C.lavH],[26.6,29.5,C.gold],[90.1,93,C.pink],[93.5,98.5,C.lavH]];
+function brainState(t){let act=0,col=C.lavH;for(const [a,b,c] of FIRE){const v=seg(t,a,a+.8)*(1-seg(t,b-.8,b));if(v>act){act=v;col=c}}return{act,col}}
+function drawBrain(t){
+ const {act,col}=brainState(t);
+ ctx.save();
+ ctx.beginPath();ctx.ellipse(230,86,40,26,0,0,7);ctx.fillStyle='rgba(183,156,255,.14)';ctx.fill();ctx.strokeStyle='rgba(183,156,255,.6)';ctx.lineWidth=2;ctx.stroke();
+ ctx.strokeStyle=col;ctx.lineWidth=1.2;
+ for(const [i,j] of be){ctx.globalAlpha=.2+.6*act;ctx.beginPath();ctx.moveTo(bn[i][0],bn[i][1]);ctx.lineTo(bn[j][0],bn[j][1]);ctx.stroke()}
+ bn.forEach((p,i)=>{const lit=act*(.35+.65*Math.pow(Math.sin(t*13+i*2.3),2));
+  ctx.globalAlpha=1;ctx.fillStyle='#2a3350';ctx.beginPath();ctx.arc(p[0],p[1],3.2,0,7);ctx.fill();
+  if(lit>.05){ctx.globalAlpha=lit;ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=12;ctx.beginPath();ctx.arc(p[0],p[1],4.5,0,7);ctx.fill();ctx.shadowBlur=0}});
+ ctx.restore();
+ txt('brain',268,36,15,C.mute,'left',500);
+}
+function drawFace(t,M){
+ ctx.fillStyle='#9fc1e6';ctx.beginPath();ctx.arc(213,122,3.5,0,7);ctx.arc(247,122,3.5,0,7);ctx.fill();
+ ctx.strokeStyle='#9fc1e6';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.beginPath();
+ if(M<.42)ctx.arc(230,146,10,1.2*Math.PI,1.8*Math.PI);else ctx.arc(230,134,11,(.2-(M-.5)*.15)*Math.PI,(.8+(M-.5)*.15)*Math.PI);
+ ctx.stroke();
+ ctx.fillStyle='#6f8fb3';ctx.beginPath();ctx.moveTo(230,126);ctx.lineTo(225,134);ctx.lineTo(235,134);ctx.closePath();ctx.fill();
+}
+function drawMonitor(t){
+ const M=mood(t),lav=clamp((M-.5)*2,0,1);
+ ctx.lineCap='round';ctx.lineJoin='round';
+ const ec=`rgb(${mx(C.edge,C.lav,lav)})`;
+ for(const pass of [0,1])for(const p of parts){poly(p.p,p.w+(pass?0:5),pass?C.body:ec)}
+ ctx.strokeStyle='rgba(120,150,200,.35)';ctx.lineWidth=2.5;ctx.beginPath();[[230,128],[238,112],[226,98],[230,88]].forEach((q,i)=>i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]));ctx.stroke();
+ const ex=env(t,90.4,93.8,.6)*.85,bc=moodCol(M).split(',').map(Number),cc=`rgba(${bc.map((v,i)=>Math.round(lerp(v,[255,143,184][i],ex))).join(',')},.88)`;
+ for(const c of cells){ctx.fillStyle=cc;ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,7);ctx.fill();ctx.fillStyle='rgba(8,16,27,.5)';ctx.beginPath();ctx.arc(c.x+c.r*.15,c.y,c.r*.38,0,7);ctx.fill()}
+ drawWatch(t);drawBrain(t);drawFace(t,M);
+ txt('Human body (inside view)',20,700,15,C.mute,'left',400);
+}
+
+/* ---------- world: shared ---------- */
+const PX=440,PY=70,PW=820,PH=620,FLOOR=640;
+function panel(label,c1,c2){
+ const g=ctx.createLinearGradient(0,PY,0,PY+PH);g.addColorStop(0,c1);g.addColorStop(1,c2);
+ ctx.fillStyle=g;rr(PX,PY,PW,PH,14);ctx.fill();ctx.strokeStyle='#2a3f5a';ctx.lineWidth=2;ctx.stroke();
+ ctx.save();rr(PX,PY,PW,PH,14);ctx.clip();
+ ctx.fillStyle='rgba(255,255,255,.05)';ctx.fillRect(PX,FLOOR,PW,PY+PH-FLOOR);
+ ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(PX,FLOOR);ctx.lineTo(PX+PW,FLOOR);ctx.stroke();
+ txt(label,PX+18,PY+30,16,'#c9d6e6','left',600);
+}
+function person(x,base,pose,t){
+ const col='#9db8d6';
+ let sh,hx,hy;
+ if(pose==='sit'){
+  sh=[x,base-125];hx=x+3;hy=base-155;
+  poly([[x,base-55],[x+60,base-58],[x+64,base-6]],20,col);
+  poly([[x,base-55],[x,base-125]],38,col);
+  poly([sh,[x+22,base-90],[x+60,base-120]],14,col);
+ }else{
+  sh=[x,base-170];hx=x+3;hy=base-200;
+  poly([[x,base-100],[x-4,base-52],[x-2,base-4]],20,col);poly([[x,base-100],[x+6,base-52],[x+10,base-4]],20,col);
+  poly([[x,base-100],sh],38,col);
+  if(pose==='spray')poly([sh,[x+24,base-150],[x+44,base-166]],14,col);
+  else if(pose==='open')poly([sh,[x+16,base-130],[x+40,base-108]],14,col);
+  else poly([sh,[x+4,base-125],[x+14,base-88]],14,col);
+ }
+ ctx.fillStyle='#cfe0f3';ctx.beginPath();ctx.arc(hx,hy,23,0,7);ctx.fill();
+ ctx.fillStyle='#6f8fb3';ctx.beginPath();ctx.moveTo(hx+22,hy-2);ctx.lineTo(hx+30,hy+8);ctx.lineTo(hx+20,hy+8);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#0b1220';ctx.beginPath();ctx.arc(hx+11,hy-5,2.8,0,7);ctx.fill();
+ return [hx,hy];
+}
+function bottle(x,yb,reveal,fill,spr){
+ ctx.save();
+ const top=yb-112+(1-reveal)*112;ctx.beginPath();ctx.rect(x-40,top,80,yb+10-top);ctx.clip();
+ ctx.fillStyle='rgba(183,156,255,.3)';ctx.strokeStyle='#c9b6ff';ctx.lineWidth=2.5;
+ rr(x-24,yb-70,48,70,12);ctx.fill();ctx.stroke();
+ rr(x-8,yb-92,16,26,3);ctx.fill();ctx.stroke();
+ if(fill>0){ctx.fillStyle='rgba(150,100,230,.85)';rr(x-21,yb-3-fill*62,42,fill*62,8);ctx.fill()}
+ ctx.fillStyle='#e9e1ff';rr(x-11,yb-106,22,16,4);ctx.fill();
+ if(spr&&reveal>.9){ctx.strokeStyle='#7c5cc4';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,yb-14);ctx.lineTo(x,yb-50);ctx.stroke();ctx.fillStyle='#7c5cc4';for(let i=0;i<4;i++){ctx.beginPath();ctx.ellipse(x+(i%2?5:-5),yb-24-i*7,3,5,0,0,7);ctx.fill()}}
+ ctx.restore();
+}
+function boxShape(x,yb,wu,lu){
+ const h=112*wu;ctx.fillStyle='rgba(201,164,107,.96)';ctx.strokeStyle='#8a6a3a';ctx.lineWidth=2;
+ if(h>1){rr(x-36,yb-h,72,h,4);ctx.fill();ctx.stroke()}
+ if(lu>0){const ly=lerp(yb-160,yb-122,lu);ctx.fillStyle='#d6b27a';rr(x-39,ly,78,12,3);ctx.fill();ctx.stroke()}
+ if(lu>=1){ctx.fillStyle='#8a6a3a';txt('Lavanda',x,yb-60,11,'#4a3412','center',600);ctx.strokeStyle='#7c5cc4';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,yb-18);ctx.lineTo(x,yb-45);ctx.stroke()}
+}
+function mini(x,y,w,h,label,lines,t,tCol){
+ ctx.fillStyle='#0c1522';rr(x,y,w,h,8);ctx.fill();ctx.strokeStyle=C.line;ctx.lineWidth=2.5;ctx.stroke();
+ ctx.fillStyle='#16263b';ctx.fillRect(x-14,y+h+4,w+28,9);
+ txt(label,x,y-10,14,C.mute,'left',500);
+ lines.forEach((l,i)=>{if(t>=l[0]){txt(l[1],x+10,y+24+i*21,12,l[2]||'#e7eef7','left',l[3]||400)}});
+}
+function drawDog(x,y,dir,t,box){
+ ctx.save();ctx.translate(x,y);ctx.scale(dir,1);
+ const sw=i=>Math.sin(t*10+(i%2?Math.PI:0)+i*.4)*9;
+ ctx.strokeStyle='#6a88aa';ctx.lineWidth=7;ctx.lineCap='round';
+ [-26,-12,12,26].forEach((lx,i)=>{ctx.beginPath();ctx.moveTo(lx,-34);ctx.lineTo(lx+sw(i),0);ctx.stroke()});
+ ctx.fillStyle='#2b3b55';ctx.strokeStyle='#6a88aa';ctx.lineWidth=2;rr(-38,-60,76,28,9);ctx.fill();ctx.stroke();
+ ctx.beginPath();ctx.arc(46,-64,13,0,7);ctx.fill();ctx.stroke();rr(52,-66,16,11,4);ctx.fill();ctx.stroke();
+ ctx.fillStyle=C.teal;ctx.beginPath();ctx.arc(48,-68,2.8,0,7);ctx.fill();
+ ctx.strokeStyle='#6a88aa';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-38,-52);ctx.lineTo(-52,-66);ctx.stroke();
+ ctx.beginPath();ctx.moveTo(42,-76);ctx.lineTo(38,-92);ctx.stroke();
+ if(box){ctx.fillStyle='#c9a46b';ctx.strokeStyle='#8a6a3a';rr(-26,-98,44,38,4);ctx.fill();ctx.stroke();ctx.strokeStyle='#7c5cc4';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-4,-70);ctx.lineTo(-4,-90);ctx.stroke()}
+ ctx.restore();
+}
+function drawDrone(x,y,t,hang){
+ ctx.save();ctx.translate(x,y);
+ ctx.strokeStyle='#cbd5e1';ctx.lineWidth=4;ctx.lineCap='round';
+ [[-44,-16],[44,-16]].forEach(p=>{ctx.beginPath();ctx.moveTo(p[0]>0?20:-20,-2);ctx.lineTo(p[0],p[1]);ctx.stroke()});
+ ctx.fillStyle='#cbd5e1';rr(-26,-8,52,18,7);ctx.fill();ctx.fillStyle=C.teal;ctx.beginPath();ctx.arc(0,1,4,0,7);ctx.fill();
+ [[-44,-18],[44,-18]].forEach((p,i)=>{ctx.fillStyle=`rgba(200,215,235,${.35+.3*Math.abs(Math.sin(t*40+i))})`;ctx.beginPath();ctx.ellipse(p[0],p[1],24,3,0,0,7);ctx.fill()});
+ ctx.strokeStyle='#8fa2b8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-14,10);ctx.lineTo(-18,18);ctx.moveTo(14,10);ctx.lineTo(18,18);ctx.stroke();
+ if(hang!==null){ctx.strokeStyle='#8fa2b8';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(0,10);ctx.lineTo(0,hang);ctx.stroke();ctx.fillStyle='#c9a46b';ctx.strokeStyle='#8a6a3a';rr(-22,hang,44,36,4);ctx.fill();ctx.stroke()}
+ ctx.restore();
+}
+
+/* ---------- world: scenes ---------- */
+function sHall(t){
+ panel('HALL · a fragrance drifts in','#1c1830','#120f1f');
+ ctx.fillStyle='#241e3d';rr(1050,190,150,230,6);ctx.fill();ctx.strokeStyle='#4a3f78';ctx.lineWidth=3;ctx.stroke();
+ ctx.beginPath();ctx.moveTo(1125,190);ctx.lineTo(1125,420);ctx.moveTo(1050,305);ctx.lineTo(1200,305);ctx.stroke();
+ const h=person(700,FLOOR,'stand',t),nose=[h[0]+26,h[1]+6];
+ const a=seg(t,.2,1.4)*(1-seg(t,6.8,8));
+ if(a>0){ctx.save();ctx.setLineDash([16,12]);ctx.lineCap='round';ctx.lineWidth=3;
+  for(let i=0;i<5;i++){ctx.lineDashOffset=-t*(40+i*6);ctx.strokeStyle=`rgba(183,156,255,${.75*a})`;ctx.beginPath();
+   for(let u=0;u<=1.001;u+=.04){const x=lerp(1050,nose[0],u),y=lerp(250+i*20,nose[1],u)+Math.sin(u*9+t*2+i)*14*(1-u*.6);u===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}ctx.stroke()}
+  ctx.restore()}
+ txt('a smell drifts in',1125,455,15,C.mute,'center',400);
+ if(t>=5.8)bubbleAt(h[0]+30,h[1]-60,'Is my perfume finished? Let me check.',C.gold);
+ ctx.restore();return h;
+}
+function sWardrobe(t){
+ panel('BEDROOM · wardrobe','#1d1626','#130e1b');
+ ctx.fillStyle='#2a2230';ctx.strokeStyle='#4a3b58';ctx.lineWidth=3;rr(760,160,230,480,8);ctx.fill();ctx.stroke();
+ ctx.strokeStyle='#4a3b58';ctx.lineWidth=2;[300,450].forEach(y=>{ctx.beginPath();ctx.moveTo(766,y);ctx.lineTo(984,y);ctx.stroke()});
+ ctx.fillStyle='rgba(120,100,160,.35)';[[780,470,26,120],[812,470,26,120],[844,470,26,110],[876,470,26,120]].forEach(r=>{rr(r[0],r[1],r[2],r[3],4);ctx.fill()});
+ ctx.fillStyle='rgba(120,100,160,.35)';[[780,330,40,50],[830,340,50,40]].forEach(r=>{rr(r[0],r[1],r[2],r[3],4);ctx.fill()});
+ ctx.fillStyle='#3a2f48';ctx.beginPath();ctx.moveTo(760,160);ctx.lineTo(715,185);ctx.lineTo(715,615);ctx.lineTo(760,640);ctx.fill();
+ const lvl=lerp(.14,0,seg(t,11,12.4));
+ bottle(900,296,1,lvl,true);
+ if(t>=12.4){ctx.fillStyle=C.red;rr(856,304,90,22,6);ctx.fill();txt('empty!',901,320,12,'#fff','center',600)}
+ const x=lerp(520,620,seg(t,8,9.6)),h=person(x,FLOOR,'stand',t);
+ if(t>=12.6&&t<17.8)bubbleAt(h[0]+30,h[1]-60,'Perfume is empty!',C.slateH);
+ ctx.restore();return h;
+}
+function reelArt(x,y,w,h,k){
+ ctx.save();rr(x,y,w,h,6);ctx.clip();
+ if(k===0){const g=ctx.createLinearGradient(0,y,0,y+h);g.addColorStop(0,'#0f3a4a');g.addColorStop(1,'#1f6f6a');ctx.fillStyle=g;ctx.fillRect(x,y,w,h);
+  ctx.fillStyle='#e7eef7';ctx.beginPath();ctx.arc(x+w/2,y+h*.55,26,0,7);ctx.fill();txt('chai reel',x+w/2,y+h-40,14,'#e7eef7','center',500)}
+ else{const g=ctx.createLinearGradient(0,y,0,y+h*.5);g.addColorStop(0,'#7b5ea7');g.addColorStop(1,'#f0a6ca');ctx.fillStyle=g;ctx.fillRect(x,y,w,h);
+  ctx.fillStyle='#fde2a6';ctx.beginPath();ctx.arc(x+w*.72,y+h*.3,22,0,7);ctx.fill();
+  ctx.fillStyle='#3b2a63';ctx.fillRect(x,y+h*.5,w,h*.5);
+  for(let r=0;r<7;r++){const yy=y+h*.52+r*(18+r*2.2);ctx.strokeStyle=r%2?'#9a7bd8':'#b79cff';ctx.lineWidth=2+r*.5;
+   for(let i=0;i<16;i++){const xx=x+(i+(r%2)*.5)*(w/15);ctx.beginPath();ctx.moveTo(xx,yy);ctx.lineTo(xx+(xx-(x+w/2))*.04,yy-14-r*3);ctx.stroke()}}
+  txt('@lavender.fields',x+12,y+h-22,13,'#fff','left',500);}
+ ctx.fillStyle='rgba(255,255,255,.9)';ctx.beginPath();ctx.arc(x+w-22,y+h*.58,9,0,7);ctx.arc(x+w-22,y+h*.58+34,9,0,7);ctx.fill();
+ ctx.restore();
+}
+function sSofa(t){
+ panel('HALL · sofa, mobile','#1c1830','#120f1f');
+ ctx.fillStyle='#3a3358';rr(550,470,300,130,18);ctx.fill();rr(540,590,320,50,10);ctx.fill();
+ ctx.fillStyle='#463d6b';rr(520,540,40,100,12);ctx.fill();rr(840,540,40,100,12);ctx.fill();
+ const h=person(690,FLOOR,'sit',t);
+ const ph=[750,520];ctx.fillStyle='#0b1220';ctx.strokeStyle='#9db8d6';ctx.lineWidth=2;rr(ph[0],ph[1],16,30,4);ctx.fill();ctx.stroke();
+ ctx.save();ctx.setLineDash([4,6]);ctx.strokeStyle='rgba(157,184,214,.45)';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(ph[0]+16,ph[1]);ctx.lineTo(950,190);ctx.moveTo(ph[0]+16,ph[1]+30);ctx.lineTo(950,590);ctx.stroke();ctx.restore();
+ ctx.fillStyle='#0b1220';ctx.strokeStyle='#8fa2b8';ctx.lineWidth=3;rr(950,190,240,400,26);ctx.fill();ctx.stroke();
+ const sx=962,sy=210,sw=216,sh=360;
+ ctx.fillStyle='#101a29';rr(sx,sy,sw,sh,8);ctx.fill();
+ txt('Reels',sx+12,sy+22,14,'#fff','left',600);
+ {const sp=seg(t,20.5,21.5)*sh;ctx.save();rr(sx,sy+30,sw,sh-30,6);ctx.clip();
+  ctx.save();ctx.translate(0,-sp);reelArt(sx,sy+30,sw,sh-30,0);ctx.restore();
+  ctx.save();ctx.translate(0,sh-30-sp);reelArt(sx,sy+30,sw,sh-30,1);ctx.restore();ctx.restore()}
+ if(t>=28.6){
+  ctx.save();rr(sx,sy,sw,sh,8);ctx.clip();
+  const off=(1-seg(t,28.6,29.4))*170,cy0=sy+sh-158+off;
+  ctx.fillStyle='rgba(16,26,41,.97)';ctx.strokeStyle='#3a5878';ctx.lineWidth=1.5;rr(sx+10,cy0,sw-20,148,12);ctx.fill();ctx.stroke();
+  if(t<35.6){
+   ctx.save();ctx.translate(sx+44,cy0+100);ctx.scale(.62,.62);bottle(0,0,1,1,true);ctx.restore();
+   txt('Lavender perfume',sx+82,cy0+34,13,'#fff','left',600);txt('Lavanda Labs (demo)',sx+82,cy0+52,11,C.mute,'left',400);txt('ships to your home',sx+82,cy0+68,11,C.mute,'left',400);
+   ctx.fillStyle='#7c5cc4';rr(sx+22,cy0+104,sw-44,34,8);ctx.fill();txt('Order now',sx+sw/2,cy0+126,14,'#fff','center',600);
+   const cu=seg(t,33.2,34.6),cx=lerp(sx+sw-30,sx+sw/2+10,cu),cy=lerp(sy+sh+10,cy0+122,cu),rip=seg(t,34.6,35.5);
+   if(rip>0){ctx.save();ctx.globalAlpha=1-rip;ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.arc(sx+sw/2+10,cy0+121,6+rip*26,0,7);ctx.stroke();ctx.restore()}
+   if(t<35.4){ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(cx,cy);ctx.lineTo(cx+5,cy+19);ctx.lineTo(cx+10,cy+12);ctx.lineTo(cx+18,cy+10);ctx.closePath();ctx.fill();ctx.stroke()}
+  }else{
+   txt('Order placed',sx+sw/2,cy0+62,17,C.ok,'center',600,UI);txt('Lavender perfume x1',sx+sw/2,cy0+88,12,C.mute,'center',400);txt('placed by you from the reel',sx+sw/2,cy0+108,12,C.mute,'center',400);
+  }
+  ctx.restore();
+ }
+ if(t>=22.8&&t<26.6)bubbleAt(h[0]+30,h[1]-62,'That lavender smell!',C.lavH);
+ else if(t>=26.6&&t<30)bubbleAt(h[0]+30,h[1]-62,'I want this one!',C.gold);
+ bolt(info([[1070,192],[1076,150],[1070,100]]),36.3,37.8,t,C.lavL);
+ ctx.restore();return h;
+}
+function sFactory(t){
+ panel('FACTORY · Lavanda Labs (demo)','#101c2b','#0b1420');
+ const BY=560;
+ ctx.fillStyle='#243449';rr(455,BY,750,16,6);ctx.fill();ctx.fillStyle='#16263b';for(let x=470;x<1200;x+=34){ctx.beginPath();ctx.arc(x+((t*30)%34),BY+8,3,0,7);ctx.fill()}
+ // machines
+ const mach=(x,w,label,status,col)=>{ctx.fillStyle='#0f1b2b';ctx.strokeStyle='#3a5878';ctx.lineWidth=2.5;rr(x,320,w,240,8);ctx.fill();ctx.stroke();txt(label,x+w/2,598,13,C.mute,'center',500);if(status)txt(status,x+w/2,312,13,col||C.teal,'center',600)};
+ const pr=seg(t,42.3,47.5),fl=seg(t,49.6,52.8);
+ mach(650,140,'3D PRINTER',t>=42&&t<48?'PRINTING '+Math.round(pr*100)+'%':t>=48?'DONE':'',C.lavH);
+ mach(830,140,'FILLING MACHINE',t>=49.4&&t<53?'FILLING '+Math.round(fl*100)+'%':t>=53?'DONE':'',C.lavH);
+ mach(1030,160,'PACKAGING MACHINE',t>=54.4&&t<58.6?'PACKING':t>=58.6?'DONE':'',C.lavH);
+ // printer head
+ const hy=BY-pr*108-14,hx=720+(t>=42&&t<48?Math.sin(t*6)*22:0);
+ ctx.fillStyle='#2a3f5a';ctx.fillRect(665,345,110,8);
+ ctx.fillStyle=C.lavH;rr(hx-14,Math.min(hy,BY-14),28,14,3);ctx.fill();
+ if(t>=42&&t<48){ctx.strokeStyle='rgba(183,156,255,.5)';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(hx,349);ctx.lineTo(hx,Math.min(hy,BY-14));ctx.stroke()}
+ // filler tank
+ ctx.fillStyle='rgba(150,100,230,.8)';rr(850,335,100,56,8);ctx.fill();ctx.strokeStyle='#3a5878';ctx.lineWidth=2;ctx.stroke();
+ ctx.fillStyle='#3a5878';ctx.fillRect(896,391,8,40);ctx.beginPath();ctx.moveTo(890,431);ctx.lineTo(910,431);ctx.lineTo(900,448);ctx.closePath();ctx.fill();
+ if(t>=49.6&&t<52.9){ctx.strokeStyle='rgba(150,100,230,.9)';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(900,448);ctx.lineTo(900,BY-100+(1-fl)*0+0);ctx.stroke()}
+ // packer press
+ ctx.fillStyle='#2a3f5a';ctx.fillRect(1060,345,100,10);
+ // items
+ const bt=t;
+ let bx=null,rev=1,fill=0;
+ if(bt>=42.3&&bt<48){bx=720;rev=pr}else if(bt>=48&&bt<49.6){bx=lerp(720,900,seg(bt,48,49.6));rev=1}
+ else if(bt>=49.6&&bt<53){bx=900;fill=fl}else if(bt>=53&&bt<54.6){bx=lerp(900,1110,seg(bt,53,54.6));fill=1}
+ else if(bt>=54.6&&bt<59){bx=1110;fill=1}
+ const wu=seg(t,54.8,56.4),lu=seg(t,56.6,58),yb=BY-2;
+ if(t>=59.2){/* box handed to dog (drawn in dog code) */}
+ else{
+  if(bx!==null){bottle(bx,yb,rev,fill,true)}
+  if(t>=54.8)boxShape(1110,yb,wu,lu);
+ }
+ // dog robot
+ let dogX=null,boxOnDog=false;
+ if(t>=56&&t<58.5)dogX=lerp(1290,1215,seg(t,56,58.5));else if(t>=58.5&&t<60){dogX=1215;boxOnDog=t>=59.4}
+ if(t>=58.5&&t<59.4){const u=seg(t,58.5,59.4);const px=lerp(1110,1197,u),py=yb-60*Math.sin(u*Math.PI)-u*30;ctx.save();ctx.translate(px,py);ctx.scale(.6,.6);boxShape(0,0,1,1);ctx.restore()}
+ if(dogX!==null)drawDog(dogX,BY-2,-1,t,boxOnDog);
+  agentNN(FACT_NN,t);
+ bolt(info([[620,72],[620,100],[620,126]]),38,39.2,t,C.lavL);
+ bolt(info([[720,278],[720,336]]),42,43.2,t,C.lavL);
+ bolt(info([[900,278],[900,326]]),47.6,48.8,t,C.lavL);
+ bolt(info([[1110,278],[1110,326]]),52.8,54,t,C.lavL);
+ ctx.restore();return null;
+}
+function sRoad(t){
+ panel('FACTORY → WAREHOUSE','#0f1a2a','#0a121d');
+ ctx.fillStyle='#16263b';ctx.strokeStyle='#3a5878';ctx.lineWidth=2.5;
+ rr(470,440,150,200,6);ctx.fill();ctx.stroke();ctx.fillRect(500,380,26,62);ctx.strokeRect(500,380,26,62);
+ txt('factory',545,470,14,C.mute,'center',500);
+ ctx.fillStyle='#16263b';rr(1010,410,220,230,6);ctx.fill();ctx.stroke();ctx.fillStyle='#0b1420';rr(1090,520,70,120,4);ctx.fill();
+ txt('WAREHOUSE',1120,445,14,C.mute,'center',600);
+ ctx.save();ctx.strokeStyle='#243449';ctx.lineWidth=3;ctx.setLineDash([18,14]);ctx.lineDashOffset=-t*70;ctx.beginPath();ctx.moveTo(PX,656);ctx.lineTo(PX+PW,656);ctx.stroke();ctx.restore();
+ const x=t<68?lerp(660,1040,seg(t,60,68)):lerp(1040,1110,seg(t,68,70));
+ ctx.save();ctx.globalAlpha=1-seg(t,68.6,70);drawDog(x,FLOOR,1,t,true);ctx.restore();
+ agentNN(RB_NN,t);
+ ctx.restore();return null;
+}
+function sWarehouse(t){
+ panel('','#101a28','#0a111c');
+ const BY=590;ctx.fillStyle='#243449';rr(455,BY,380,14,6);ctx.fill();
+ ctx.strokeStyle='#3a5878';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(640,BY);ctx.lineTo(640,420);ctx.lineTo(720,420);ctx.lineTo(720,BY);ctx.stroke();
+ txt('SCANNER',680,405,13,C.mute,'center',600);
+ const px=lerp(480,800,seg(t,70.3,74));
+ const scan=px>640&&px<720&&t<74;
+ if(scan){ctx.strokeStyle=C.red;ctx.lineWidth=3;ctx.shadowColor=C.red;ctx.shadowBlur=12;ctx.beginPath();ctx.moveTo(642,BY-100+Math.abs(Math.sin(t*14))*98);ctx.lineTo(718,BY-100+Math.abs(Math.sin(t*14))*98);ctx.stroke();ctx.shadowBlur=0}
+ boxShape(px,BY-2,1,1);
+ if(t>=72.6){ctx.fillStyle='#16a34a';rr(630,438,100,24,6);ctx.fill();txt('SCANNED',680,455,13,'#fff','center',600)}
+ ctx.fillStyle='#243449';ctx.fillRect(1000,598,120,10);txt('drone pad',1060,632,13,C.mute,'center',500);
+ if(t>=76.4){const lift=seg(t,79.2,80)*90;drawDrone(1060,576-lift,t,null);txt('drone D-12',1060,520-lift,13,C.mute,'center',500)}
+ agentNN(WH_NN,t);agentNN(TR_NN,t);
+ bolt(info([[722,420],[700,340],[650,272]]),72.8,74.2,t,C.lavL);
+ bolt(info([[830,195],[880,195]]),74.8,76,t,C.lavL);
+ bolt(info([[880,215],[830,215]]),77.6,78.8,t,C.ok);
+ ctx.restore();return null;
+}
+function sDrone(t){
+ panel('SKY · warehouse → home','#1b2b50','#2d4572');
+ ctx.fillStyle='rgba(255,255,255,.12)';[[0,150,120],[1,260,80],[2,200,100]].forEach(c=>{const x=PX+((c[1]*3+t*(8+c[0]*4))%(PW+160))-80;ctx.beginPath();ctx.ellipse(x,c[1]+c[0]*40,c[2]/2,16,0,0,7);ctx.ellipse(x+30,c[1]+c[0]*40-10,c[2]/3,14,0,0,7);ctx.fill()});
+ ctx.fillStyle='#16263b';ctx.strokeStyle='#3a5878';ctx.lineWidth=2.5;rr(470,500,130,140,6);ctx.fill();ctx.stroke();ctx.fillStyle='#243449';ctx.fillRect(490,494,90,8);
+ txt('warehouse',535,570,13,C.mute,'center',500);
+ ctx.fillStyle='#2a2f50';ctx.strokeStyle='#4a5090';ctx.beginPath();ctx.moveTo(1000,450);ctx.lineTo(1125,360);ctx.lineTo(1250,450);ctx.closePath();ctx.fill();ctx.stroke();
+ rr(1015,450,220,190,4);ctx.fill();ctx.stroke();ctx.fillStyle='#0b1220';rr(1100,540,50,100,4);ctx.fill();ctx.fillStyle='#f5d77a';rr(1170,490,40,40,4);ctx.fill();
+ txt('home',1125,480,13,C.mute,'center',500);
+ const h=person(1195,FLOOR,'stand',t);
+ let dx,dy,hang=null,parcel=null;
+ if(t<82){const u=seg(t,80,82);dx=lerp(480,535,u);dy=lerp(130,415,u);parcel=[535,478]}
+ else if(t<83.2){dx=535;dy=415;const u=seg(t,82,83.2);hang=lerp(14,64,1-u*.0);parcel=null;hang=64;}
+ else if(t<88.3){const u=seg(t,83.2,88.3),e=u*u*(3-2*u);dx=(1-e)*(1-e)*535+2*(1-e)*e*800+e*e*1060;dy=(1-e)*(1-e)*415+2*(1-e)*e*150+e*e*540;hang=64}
+ else if(t<89.4){dx=1060;dy=540;hang=64;}
+ else{dx=1060;dy=lerp(540,60,seg(t,89.4,90));}
+ if(t>=82&&t<89.4){/* hanging parcel drawn by drone */}
+ if(parcel){ctx.fillStyle='#c9a46b';ctx.strokeStyle='#8a6a3a';ctx.lineWidth=2;rr(parcel[0]-22,parcel[1],44,36,4);ctx.fill();ctx.stroke()}
+ if(t>=89.4){const u=seg(t,89.4,90),px=lerp(1060,1184,u);ctx.fillStyle='#c9a46b';ctx.strokeStyle='#8a6a3a';ctx.lineWidth=2;rr(px-22,604,44,36,4);ctx.fill();ctx.stroke()}
+ drawDrone(dx,dy,t,hang);
+ if(t>=82&&t<89.4)txt('drone D-12',dx,dy-34,13,C.mute,'center',500);
+ agentNN(DR_NN,t);
+ [[80.4,81.2],[82.6,83.4],[87.8,88.6]].forEach(w=>bolt(info([[1010,240],[(1010+dx)/2,(240+dy)/2-20],[dx,dy-20]]),w[0],w[1],t,C.lavL));
+ ctx.restore();return h;
+}
+function sHome(t){
+ panel('HOME · unboxing and spray','#1c1830','#120f1f');
+ ctx.fillStyle='#241e3d';rr(1050,190,150,230,6);ctx.fill();ctx.strokeStyle='#4a3f78';ctx.lineWidth=3;ctx.stroke();
+ const pose=t<92.8?'open':'spray',x=720,h=person(x,FLOOR,pose,t);
+ if(t<92.8){
+  const u=seg(t,90.6,92.4);
+  ctx.fillStyle='#c9a46b';ctx.strokeStyle='#8a6a3a';ctx.lineWidth=2;rr(x+22,FLOOR-114,46,34,4);ctx.fill();ctx.stroke();
+  ctx.save();ctx.translate(x+22,FLOOR-114);ctx.rotate(-u*1.1);ctx.fillStyle='#d6b27a';rr(0,-6,46,8,2);ctx.fill();ctx.stroke();ctx.restore();
+  if(u>0)bottle(x+45,FLOOR-110-u*14,1,1,true);
+ }else{
+  const N=[x+40,FLOOR-166];
+  ctx.save();ctx.translate(N[0]+10,N[1]);bottle(0,40,1,.9,true);ctx.restore();
+  const on=t>=93.5&&t<97.4;
+  if(on)for(let k=0;k<44;k++){const u=((t-93.5)*1.4+k/44)%1,px=lerp(N[0]-4,x-4,u)+(rnd(k)-.5)*34*u,py=lerp(N[1]-2,FLOOR-152,u)+(rnd(k+99)-.5)*46*u;
+   ctx.fillStyle=`rgba(${k%2?'183,156,255':'217,201,255'},${(1-u)*.8})`;ctx.beginPath();ctx.arc(px,py,2+u*4,0,7);ctx.fill()}
+ }
+ if(t>=97.4){const a=.5+.5*Math.sin(t*3);ctx.fillStyle=`rgba(183,156,255,${.08+.07*a})`;ctx.beginPath();ctx.arc(x,FLOOR-130,120,0,7);ctx.fill()}
+ if(t>=90.4&&t<91.5)bubbleAt(h[0]+34,h[1]-58,'A parcel for me!',C.pink);
+ else if(t>=91.5&&t<92.9)bubbleAt(h[0]+34,h[1]-58,'What could it be?',C.pink);
+ if(t>=95&&t<100)bubbleAt(h[0]+34,h[1]-58,'Lovely lavender!',C.lavH);
+ ctx.restore();return h;
+}
+function drawWorld(t){
+ if(t<8)return sHall(t);
+ if(t<18)return sWardrobe(t);
+ if(t<38)return sSofa(t);
+ if(t<60)return sFactory(t);
+ if(t<70)return sRoad(t);
+ if(t<80)return sWarehouse(t);
+ if(t<90)return sDrone(t);
+ return sHome(t);
+}
+
+
+/* ---------- wearable + neural network computer ---------- */
+const P_arm=info([[250,100],[285,170],[310,240],[335,310],[343,360],[345,402]]);
+const P_wn=info([[362,396],[395,340],[415,250],[432,190]]);
+const P_phone=info([[1130,272],[1136,320],[1138,370]]);
+const WATCH=[[4,5.2],[6.6,7.6],[11.8,13],[23.8,25],[26.8,27.8],[91.4,92.6],[96,97.2]];
+function drawWatch(t){
+ let act=0;for(const [a,b] of WATCH)act=Math.max(act,seg(t,a,a+.3)*(1-seg(t,b,b+.8)));
+ ctx.save();ctx.translate(345,405);
+ ctx.fillStyle='#2a3f5a';ctx.fillRect(-9,-32,18,64);
+ ctx.fillStyle='#0b1220';rr(-17,-20,34,40,8);ctx.fill();ctx.lineWidth=3;ctx.strokeStyle=act>0?C.lavH:'#6a88aa';ctx.stroke();
+ ctx.globalAlpha=.35+.65*act;ctx.strokeStyle=C.lavH;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-10,2);ctx.lineTo(-4,2);ctx.lineTo(-1,-9);ctx.lineTo(3,11);ctx.lineTo(6,2);ctx.lineTo(10,2);ctx.stroke();ctx.globalAlpha=1;
+ if(act>0){const ph=(t*1.6)%1;ctx.globalAlpha=.6*act*(1-ph);ctx.strokeStyle=C.lavH;ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,24+ph*22,0,7);ctx.stroke()}
+ ctx.restore();
+}
+const env=(t,a,b,r)=>{r=r||.6;return seg(t,a,a+r)*(1-seg(t,b-r,b))};
+const NNin=['smell signal','olfactory neurons','cell calm','idea / intent','bottle status','feed content'];
+const NNout=['pleasant smell','check perfume','perfume empty','show lavender','intent: buy'];
+const NNinF=['parcel received','curiosity','happiness','smell signal','olfactory neurons','cell calm'],NNoutF=['parcel opened','happy anticipation','pleasant smell','delight','need satisfied'];
+function inputs(t){if(t>=90)return[env(t,90.1,93.6,.5),env(t,90.6,93.4,.5),env(t,91,95),env(t,93.6,98.6),env(t,94.2,98.6),env(t,95.2,100,.8)];const M=mood(t);return[
+ Math.max(env(t,1.4,6),env(t,93.6,98.5)),
+ brainState(t).act,
+ clamp(Math.abs(M-.5)*2.2,0,1),
+ Math.max(env(t,5.6,8),env(t,26.6,29.5)),
+ Math.max(env(t,9.8,20),.4*env(t,9.8,38,1)),
+ env(t,19,28)]}
+const outputs=t=>t>=90?[env(t,91,93.8,.5),env(t,91.8,94,.5),env(t,94,99),env(t,95.6,100,.6),env(t,97.4,100,.5)]:[Math.max(env(t,3.8,8.6),env(t,96.5,100)),env(t,6.4,10),env(t,13,24),env(t,19,28.5),env(t,26.2,38.5,1)];
+const LOG=[
+ [1.6,'in: aroma signal'],[3.4,'in: olfactory neurons fire'],[4.6,'in: cells calm (lavender)'],[6.2,'infer: pleasant smell'],[7,'intent: check perfume stock'],
+ [9.9,'in: wardrobe check'],[10.8,'in: bottle is EMPTY'],[12.2,'in: neurons: disappointment'],[13.8,'infer: perfume needed'],[15,'state: mood low'],
+ [18.4,'context to reels app (consent)'],[19.2,'feed: lavender content up'],[21.8,'in: eyes on lavender reel'],[23.8,'in: neurons: memory + interest'],[25.2,'infer: wants lavender perfume'],[26.8,'intent: wants to buy now'],
+ [28.8,'feed: Order now pop-up shown'],[31,'waiting for the human to decide'],[35.2,'order placed by the human'],
+ [90.3,'in: parcel received in hand'],[91,'in: neurons: curiosity + joy'],[91.8,'in: cells: excited, pulse up'],[92.6,'infer: happy anticipation'],[93.7,'in: lavender aroma on skin'],[95,'in: neurons: calm + pleasure'],[96.4,'in: cells: relaxed'],[97.8,'infer: delight, need satisfied']
+];
+function drawNN(t){
+ const x=430,y=80,w=810,h=190,fin=t>=90,col=fin?(t<93.8?C.pink:C.lavH):C.teal;
+ ctx.fillStyle='#0c1522';rr(x,y,w,h,10);ctx.fill();ctx.strokeStyle=C.line;ctx.lineWidth=2.5;ctx.stroke();
+ ctx.fillStyle='#16263b';ctx.fillRect(x+w/2-80,y+h+4,160,8);
+ txt('COMPUTER · NEURAL NETWORK (reads the wearable)',x,y-12,15,C.mute,'left',500);
+ const sizes=[6,6,6,5],lx=[x+190,x+270,x+350,x+430];
+ const ny=(l,i)=>y+24+(h-48)*((i+.5)/sizes[l]);
+ const inp=inputs(t),outs=outputs(t),A=[1,2,3].map(l=>Math.max(...inputs(t-.3*l)));
+ const act=(l,i)=>l===0?inp[i]:l===3?outs[i]:A[l-1];
+ ctx.save();ctx.lineWidth=1;ctx.strokeStyle=col;
+ for(let l=0;l<3;l++)for(let i=0;i<sizes[l];i++)for(let j=0;j<sizes[l+1];j++){ctx.globalAlpha=.07+.5*act(l,i)*act(l+1,j);ctx.beginPath();ctx.moveTo(lx[l],ny(l,i));ctx.lineTo(lx[l+1],ny(l+1,j));ctx.stroke()}
+ ctx.restore();
+ for(let l=0;l<4;l++)for(let i=0;i<sizes[l];i++){
+  const a=act(l,i),lit=l===0||l===3?a:a*(.55+.45*Math.pow(Math.sin(t*9+i*1.7+l*2.3),2));
+  ctx.fillStyle='#16263b';ctx.strokeStyle='#3a5878';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(lx[l],ny(l,i),7,0,7);ctx.fill();ctx.stroke();
+  if(lit>.03){ctx.save();ctx.globalAlpha=lit;ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=12;ctx.beginPath();ctx.arc(lx[l],ny(l,i),7,0,7);ctx.fill();ctx.restore()}
+ }
+ (fin?NNinF:NNin).forEach((s2,i)=>txt(s2,lx[0]-14,ny(0,i)+4,11,inp[i]>.3?'#e7eef7':C.mute,'right',500));
+ (fin?NNoutF:NNout).forEach((s2,i)=>txt(s2,lx[3]+14,ny(3,i)+4,11,outs[i]>.3?(fin&&t<93.8?C.pink:col):C.mute,'left',600));
+ const vis=LOG.filter(e=>e[0]<=t&&(t>=90?e[0]>=90:e[0]<38)).slice(-7);
+ txt('inference log',x+600,y+22,12,C.mute,'left',600);
+ vis.forEach((e,i)=>{const age=vis.length-1-i;txt(e[1],x+600,y+44+i*20,11,age===0?'#fff':'#a9bad0','left',age===0?600:400)});
+}
+function drawFeed(t){
+ const x=440,y=300,w=275,h=235,M=mood(t);
+ ctx.fillStyle='#0c1522';rr(x,y,w,h,10);ctx.fill();ctx.strokeStyle=C.line;ctx.lineWidth=2;ctx.stroke();
+ txt('WEARABLE SENSOR · live readings',x+14,y+26,13,C.mute,'left',600);
+ const inp=inputs(t),A=Math.max(...inp);
+ const rows=t>=90?[['curiosity',inp[1],C.pink],['happiness / joy',inp[2],C.gold],['smell response',inp[3],C.lavH],['cell calm',clamp(M,0,1),`rgb(${moodCol(M)})`]]:[['smell response',inp[0],C.lavH],['neuron activity',brainState(t).act,C.lavH],['cell calm',clamp(M,0,1),`rgb(${moodCol(M)})`],['interest in lavender',Math.max(env(t,21.8,38,1.5),env(t,93.6,100)),C.gold]];
+ rows.forEach((r,i)=>{const ry=y+54+i*40;txt(r[0],x+14,ry,13,'#e7eef7','left',500);ctx.fillStyle='#16263b';rr(x+14,ry+8,w-28,10,5);ctx.fill();ctx.fillStyle=r[2];rr(x+14,ry+8,Math.max(6,(w-28)*clamp(r[1],0,1)),10,5);ctx.fill()});
+ ctx.strokeStyle=C.lavH;ctx.lineWidth=2;ctx.beginPath();
+ for(let i=0;i<=w-28;i+=3){const yy=y+h-24+Math.sin(i*.13-t*7)*(2+9*A);i?ctx.lineTo(x+14+i,yy):ctx.moveTo(x+14+i,yy)}
+ ctx.stroke();
+ txt('shared with the computer with consent',x+14,y+h+22,12,C.mute,'left',400);
+}
+
+
+/* ---------- agent neural networks (factory, warehouse, transport, drone) ---------- */
+function agentNN(c,t){
+ const x=c.x,y=c.y,w=c.w,h=c.h,col=C.teal,ni=c.ins.length,no=c.outs.length,mid=Math.max(ni,no),sizes=[ni,mid,mid,no];
+ const lw=c.lw,gap=c.gap,lx=[0,1,2,3].map(k=>x+lw+14+k*gap),single=!c.logX;
+ ctx.fillStyle='#0c1522';rr(x,y,w,h,10);ctx.fill();ctx.strokeStyle=C.line;ctx.lineWidth=2.5;ctx.stroke();
+ txt(c.title,x,y-10,14,C.mute,'left',500);
+ const ny=(l,i)=>y+22+(h-(single?50:44))*((i+.5)/sizes[l]);
+ const inp=c.inF(t),outs=c.outF(t),A=[1,2,3].map(l=>Math.max(...c.inF(t-.3*l)));
+ const act=(l,i)=>l===0?inp[i]:l===3?outs[i]:A[l-1];
+ ctx.save();ctx.lineWidth=1;ctx.strokeStyle=col;
+ for(let l=0;l<3;l++)for(let i=0;i<sizes[l];i++)for(let j=0;j<sizes[l+1];j++){ctx.globalAlpha=.07+.5*act(l,i)*act(l+1,j);ctx.beginPath();ctx.moveTo(lx[l],ny(l,i));ctx.lineTo(lx[l+1],ny(l+1,j));ctx.stroke()}
+ ctx.restore();
+ for(let l=0;l<4;l++)for(let i=0;i<sizes[l];i++){
+  const a=act(l,i),lit=l===0||l===3?a:a*(.55+.45*Math.pow(Math.sin(t*9+i*1.7+l*2.3),2));
+  ctx.fillStyle='#16263b';ctx.strokeStyle='#3a5878';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(lx[l],ny(l,i),6.5,0,7);ctx.fill();ctx.stroke();
+  if(lit>.03){ctx.save();ctx.globalAlpha=lit;ctx.fillStyle=col;ctx.shadowColor=col;ctx.shadowBlur=12;ctx.beginPath();ctx.arc(lx[l],ny(l,i),6.5,0,7);ctx.fill();ctx.restore()}
+ }
+ c.ins.forEach((s2,i)=>txt(s2,lx[0]-14,ny(0,i)+4,11,inp[i]>.3?'#e7eef7':C.mute,'right',500));
+ c.outs.forEach((s2,i)=>txt(s2,lx[3]+14,ny(3,i)+4,11,outs[i]>.3?col:C.mute,'left',600));
+ const vis=c.log.filter(e=>e[0]<=t&&e[0]<c.t1);
+ if(single){const e=vis[vis.length-1];txt(e?e[1]:'idle',x+12,y+h-10,11,e?'#fff':C.mute,'left',600)}
+ else{txt('inference log',x+c.logX,y+22,12,C.mute,'left',600);const last=vis.slice(-Math.floor((h-34)/20));
+  last.forEach((e,i)=>{const age=last.length-1-i;txt(e[1],x+c.logX,y+44+i*20,11,age===0?'#fff':'#a9bad0','left',age===0?600:400)})}
+}
+const FACT_NN={x:460,y:128,w:780,h:150,lw:112,gap:50,logX:430,t1:60,title:'AI AGENT · MANUFACTURER · neural network',
+ ins:['order data','design spec','machine status','fill level','package state'],outs:['design bottle','start filling','start packing','call robot'],
+ inF:t=>[env(t,38.8,44),env(t,40.8,48),env(t,42,59),env(t,49,54.5),env(t,54.5,59.6)],
+ outF:t=>[env(t,40.5,48.2),env(t,47,54),env(t,52.4,58.8),env(t,57.2,60,.4)],
+ log:[[39.6,'in: order #A7 received'],[40.6,'plan: design, fill, pack, hand off'],[41.6,'out: start 3D printing'],[45,'in: print progress 60%'],[47.9,'in: bottle ready'],[48.4,'out: start filling'],[51,'in: fill level 80%'],[53.2,'in: bottle full'],[53.6,'out: start packing'],[56.5,'in: box sealed'],[58.3,'out: call dog robot'],[59.6,'handoff to robot done']]};
+const RB_NN={x:460,y:128,w:780,h:150,lw:112,gap:50,logX:430,t1:70,title:'DOG ROBOT · navigation neural network',
+ ins:['parcel loaded','route map','road clear','battery','gate sensor'],outs:['follow route','keep speed','slow down','enter warehouse'],
+ inF:t=>[env(t,59.6,70,.4),env(t,60,68),env(t,62,67),.6*env(t,60,70,.4),env(t,66.4,70)],
+ outF:t=>[env(t,60.4,67),env(t,63,66.6),env(t,66.8,69.2),env(t,68.2,70,.4)],
+ log:[[60.4,'in: parcel loaded, battery ok'],[61.4,'out: follow route to warehouse'],[64,'in: road clear'],[65,'out: keep speed'],[66.8,'in: gate sensor: warehouse near'],[67.6,'out: slow down'],[68.8,'out: enter warehouse']]};
+const WH_NN={x:450,y:120,w:380,h:150,lw:104,gap:46,t1:80,title:'WAREHOUSE AGENT · neural network',
+ ins:['scan data','destination','carrier options','booking status'],outs:['route: drone','book transport','release parcel'],
+ inF:t=>[env(t,72.4,76),env(t,73,77),env(t,74,78),env(t,77,80)],
+ outF:t=>[env(t,74,78),env(t,74.6,77.5),env(t,78,80,.4)],
+ log:[[72.8,'in: parcel scanned ok'],[73.4,'in: destination = customer home'],[74.2,'plan: fastest mode = drone'],[74.8,'out: book drone delivery'],[78.2,'in: booking confirmed'],[79,'out: release parcel to drone']]};
+const TR_NN={x:880,y:120,w:355,h:150,lw:100,gap:42,t1:80,title:'TRANSPORT CO. AGENT (demo) · neural network',
+ ins:['booking request','drone fleet','weather','route data'],outs:['assign drone','plan route','confirm'],
+ inF:t=>[env(t,75.2,78),env(t,75.8,79),env(t,76,79),env(t,76.4,80)],
+ outF:t=>[env(t,76,78.6),env(t,76.6,79.4),env(t,77.4,79.8,.4)],
+ log:[[75.9,'in: booking request #D12'],[76.5,'in: fleet and weather ok'],[77,'out: assign drone D-12'],[77.6,'out: confirm booking'],[78.6,'route planned']]};
+const DR_NN={x:790,y:108,w:440,h:130,lw:90,gap:48,t1:90,title:'DRONE · onboard neural network',
+ ins:['GPS position','obstacles','wind','battery','parcel weight'],outs:['steer','altitude','land','release parcel'],
+ inF:t=>[env(t,80,90,.5),env(t,83,88),env(t,83.2,88.5),.55*env(t,80,90,.5),env(t,82,89.2)],
+ outF:t=>[env(t,83.2,88.4),env(t,80,83.6),env(t,87.6,89.6),env(t,88.8,89.8,.3)],
+ log:[[80.6,'in: GPS fix, battery 92%'],[81.6,'out: descend to warehouse pad'],[82.6,'in: parcel attached (0.4 kg)'],[83.4,'out: climb, head to customer'],[85,'in: wind ok, obstacles clear'],[87.2,'in: destination in sight'],[88,'out: land at doorstep'],[89.2,'out: release parcel']]};
+
+/* ---------- HUD ---------- */
+function drawHUD(t){
+ const M=mood(t);
+ txt('Mood',20,28,15,C.mute,'left',500);
+ ctx.fillStyle='#16263b';rr(20,36,150,10,5);ctx.fill();
+ ctx.fillStyle=`rgb(${moodCol(M)})`;rr(20,36,Math.max(8,150*M),10,5);ctx.fill();
+ txt((t>=90.3&&t<93.6)?'excited, curious':M>.8?'happy, calm':M<.42?'low':'normal',20,66,13,C.mute,'left',500);
+ txt('HUMAN CONTROL',560,40,15,C.mute,'left',500);
+ const flash=t>=33.2&&t<35.8?.5+.5*Math.sin(t*8):0;
+ [['OFF',720,56],['MEDIUM',782,104],['ON',892,50]].forEach(([s,px,pw])=>{
+  const on=s==='MEDIUM';
+  ctx.save();ctx.fillStyle=on?C.gold:'#16263b';if(on&&flash>0){ctx.shadowColor=C.gold;ctx.shadowBlur=16*flash}
+  rr(px,22,pw,26,13);ctx.fill();ctx.restore();
+  txt(s,px+pw/2,40,14,on?'#1a1400':C.mute,'center',600);
+ });
+ txt('~37 trillion cells (estimate), a few hundred drawn',PX,706,13,C.mute,'left',400);
+}
+
+/* ---------- main draw ---------- */
+function draw(t){
+ const k=cv.width/W;ctx.setTransform(k,0,0,k,0,0);ctx.clearRect(0,0,W,H);
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0c1626');g.addColorStop(1,'#08101b');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle='rgba(120,160,210,.05)';ctx.lineWidth=1;ctx.beginPath();
+ for(let x=0;x<W;x+=40){ctx.moveTo(x,0);ctx.lineTo(x,H)}for(let y=0;y<H;y+=40){ctx.moveTo(0,y);ctx.lineTo(W,y)}ctx.stroke();
+ drawMonitor(t);
+ let head=null;
+ if(t<38||t>=90){
+  ctx.save();ctx.translate(735,295);ctx.scale(.64,.64);ctx.translate(-440,-70);const h0=drawWorld(t);ctx.restore();
+  head=h0?[735+(h0[0]-440)*.64,295+(h0[1]-70)*.64]:null;drawNN(t);drawFeed(t);
+ }else head=drawWorld(t);
+ const L=C.lavL,toWatch=(a,b,c)=>bolt(P_arm,a,b,t,c),toNN=(a,b,c)=>bolt(P_wn,a,b,t,c);
+ sense(t,1.4,3,L,head);effect(t,3,4.6,L);toWatch(4,5,L);toNN(5,6.4,L);
+ toWatch(6.6,7.4,C.gold);toNN(7.4,8.6,C.gold);
+ sense(t,9.8,11.2,C.slateH,head);effect(t,11.2,12.8,C.slateH);toWatch(11.8,12.8,C.slateH);toNN(12.8,14.2,C.slateH);
+ bolt(P_phone,18.2,19.6,t,C.gold);
+ sense(t,21.8,23.2,L,head);effect(t,23.2,24.8,L);toWatch(23.8,24.8,L);toNN(24.8,26.2,L);
+ toWatch(26.8,27.6,C.gold);toNN(27.6,28.8,C.gold);
+ sense(t,90.1,91.3,C.pink,head);effect(t,91.3,92.8,C.pink);toWatch(91.4,92.4,C.pink);toNN(92.4,93.4,C.pink);
+ sense(t,93.4,95.6,L,head);effect(t,95.8,98.4,L);toWatch(96,97,L);toNN(97,98.4,L);
+ drawHUD(t);
+}
+
+/* ---------- UI ---------- */
+let T=0,playing=!matchMedia('(prefers-reduced-motion: reduce)').matches,speed=1,loop=true,drag=false,last=performance.now(),sceneNow=-1;
+const $=id=>document.getElementById(id),btn=$('play'),seek=$('seek'),timeEl=$('time'),cap=$('cap'),stepsEl=$('steps');
+function sceneAt(t){let s=0;SCENES.forEach((c,i)=>{if(t>=c.t)s=i});return s}
+SCENES.forEach(s=>{const b=document.createElement('button');b.type='button';b.innerHTML=`${s.n}<small>${s.t}s</small>`;b.onclick=()=>{T=s.t;draw(T);ui(true)};stepsEl.appendChild(b)});
+function ui(force){
+ const s=sceneAt(T);
+ if(s!==sceneNow||force){sceneNow=s;cap.innerHTML=`<b>${s+1}. ${SCENES[s].n}</b><span>${SCENES[s].x}</span>`;[...stepsEl.children].forEach((b,i)=>b.setAttribute('aria-current',i===s))}
+ if(!drag)seek.value=Math.round(T/D*1000);
+ timeEl.textContent=T.toFixed(1)+' / '+D+' s';
+}
+function updBtn(){btn.textContent=playing?'Pause':'Play'}
+btn.onclick=()=>{if(!playing&&T>=D-.05)T=0;playing=!playing;updBtn()};
+seek.oninput=()=>{drag=true;T=seek.value/1000*D;draw(T);ui()};
+seek.onchange=()=>{drag=false};
+$('speed').onchange=e=>{speed=parseFloat(e.target.value)};
+$('loop').onchange=e=>{loop=e.target.checked};
+function resize(){const r=cv.getBoundingClientRect(),d=Math.min(window.devicePixelRatio||1,2);cv.width=Math.max(320,Math.round(r.width*d));cv.height=Math.round(cv.width*H/W);draw(T)}
+new ResizeObserver(resize).observe(cv);
+function frame(now){
+ const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(playing){T+=dt*speed;if(T>=D){if(loop)T-=D;else{T=D;playing=false}updBtn()}}
+ stepCells(playing?dt:dt*.3);draw(T);ui();requestAnimationFrame(frame);
+}
+updBtn();resize();ui(true);requestAnimationFrame(frame);
+window.__sim={set:v=>{T=v}};
+})();
+</script>
+
+</body></html>
