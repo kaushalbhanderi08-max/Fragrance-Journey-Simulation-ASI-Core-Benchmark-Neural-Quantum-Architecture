@@ -1,5 +1,6 @@
 # Fragrance Journey Simulation: ASI Core Benchmark & Neural-Quantum Architecture 🚀
 🌐 **Live Demo:** [Click Here to View Simulation](https://kaushalbhanderi08-max.github.io/Fragrance-Journey-Simulation-ASI-Core-Benchmark-Neural-Quantum-Architecture/)
+
 A foundational ASI core benchmark simulation mapping microscopic molecular fragrance mechanics directly to macroscopic automated industrial supply chains, human wearable sensors, and autonomous cybernetic orchestration—built as an early-stage exploration towards Quantum AI and planetary-scale simulation architectures.
 ### Part of the Planetary-Cybernetic-Quantum & ASI Architecture Series
 
